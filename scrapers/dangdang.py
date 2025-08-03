@@ -3,8 +3,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.proxy import Proxy, ProxyType
-import logging, time
+import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +27,16 @@ def scrape_dangdang(books):
         options.add_argument('--disable-gpu')
         options.add_argument('--window-size=1920x1080')
 
-        proxy = Proxy()
-        proxy.proxy_type = ProxyType.MANUAL
         proxy_url = f"http://{proxy_config['username']}:{proxy_config['password']}@{proxy_host}:{proxy_config['port']}"
-        proxy.http_proxy = proxy_url
-        proxy.ssl_proxy = proxy_url
+        options.add_argument(f'--proxy-server={proxy_url}')
 
-        capabilities = webdriver.DesiredCapabilities.CHROME.copy()
-        proxy.add_to_capabilities(capabilities)
+        driver = webdriver.Chrome(options=options)
+        return driver
 
-        return webdriver.Chrome(options=options, desired_capabilities=capabilities)
-
-    def process_book(book):
-        for host in [proxy_config['host'], proxy_config['backup_host']]:
+    for book in books:
+        for proxy_host in [proxy_config['host'], proxy_config['backup_host']]:
             try:
-                driver = create_driver(host)
+                driver = create_driver(proxy_host)
                 driver.get(f'http://search.dangdang.com/?key={book}')
                 WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CLASS_NAME, 'name'))
@@ -53,20 +48,19 @@ def scrape_dangdang(books):
                     price = prices[0].text.strip() if prices else 'N/A'
                     results[book] = {'title': title, 'price': price, 'source': 'dangdang'}
                     driver.quit()
-                    return
+                    break
                 else:
                     results[book] = {'error': 'No results'}
                     driver.quit()
-                    return
+                    break
             except Exception as e:
                 logger.warning(f"dangdang fallback proxy due to error: {str(e)}")
                 try:
                     driver.quit()
-                except: pass
-        results[book] = {'error': 'All proxies failed'}
-
-    for book in books:
-        process_book(book)
-        time.sleep(1)  # 防止请求过快
+                except:
+                    pass
+        else:
+            results[book] = {'error': 'All proxies failed'}
+        time.sleep(1)
 
     return results

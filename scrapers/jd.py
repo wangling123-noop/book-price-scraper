@@ -1,10 +1,11 @@
+# scrapers/jd.py
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.proxy import Proxy, ProxyType
-import logging, time
+import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -26,47 +27,44 @@ def scrape_jd(books):
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
         options.add_argument('--window-size=1920x1080')
+        # 京东反爬，建议加User-Agent模拟浏览器
+        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36')
 
-        proxy = Proxy()
-        proxy.proxy_type = ProxyType.MANUAL
         proxy_url = f"http://{proxy_config['username']}:{proxy_config['password']}@{proxy_host}:{proxy_config['port']}"
-        proxy.http_proxy = proxy_url
-        proxy.ssl_proxy = proxy_url
+        options.add_argument(f'--proxy-server={proxy_url}')
 
-        capabilities = webdriver.DesiredCapabilities.CHROME.copy()
-        proxy.add_to_capabilities(capabilities)
+        driver = webdriver.Chrome(options=options)
+        return driver
 
-        return webdriver.Chrome(options=options, desired_capabilities=capabilities)
-
-    def process_book(book):
-        for host in [proxy_config['host'], proxy_config['backup_host']]:
+    for book in books:
+        for proxy_host in [proxy_config['host'], proxy_config['backup_host']]:
             try:
-                driver = create_driver(host)
+                driver = create_driver(proxy_host)
                 driver.get(f'https://search.jd.com/Search?keyword={book}')
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, 'p-name'))
+                WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, 'gl-item'))
                 )
-                elems = driver.find_elements(By.CLASS_NAME, 'p-name')
-                prices = driver.find_elements(By.CLASS_NAME, 'p-price')
-                if elems:
-                    title = elems[0].text.strip()
-                    price = prices[0].text.strip() if prices else 'N/A'
+                items = driver.find_elements(By.CLASS_NAME, 'gl-item')
+                if items:
+                    title_elem = items[0].find_element(By.CLASS_NAME, 'p-name')
+                    price_elem = items[0].find_element(By.CLASS_NAME, 'p-price')
+                    title = title_elem.text.strip()
+                    price = price_elem.text.strip()
                     results[book] = {'title': title, 'price': price, 'source': 'jd'}
                     driver.quit()
-                    return
+                    break
                 else:
                     results[book] = {'error': 'No results'}
                     driver.quit()
-                    return
+                    break
             except Exception as e:
                 logger.warning(f"jd fallback proxy due to error: {str(e)}")
                 try:
                     driver.quit()
-                except: pass
-        results[book] = {'error': 'All proxies failed'}
-
-    for book in books:
-        process_book(book)
-        time.sleep(1)  # 防止请求过快
+                except:
+                    pass
+        else:
+            results[book] = {'error': 'All proxies failed'}
+        time.sleep(1)
 
     return results
