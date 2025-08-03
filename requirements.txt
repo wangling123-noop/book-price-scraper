@@ -1,2 +1,3 @@
-Flask
-selenium
+Flask==3.0.0
+selenium==4.20.0
+requests
