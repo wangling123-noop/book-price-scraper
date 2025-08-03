@@ -1,70 +1,56 @@
-# scrapers/taobao.py
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+import logging
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import logging
-import time
+from .proxy_driver import get_chrome_driver_with_proxy
 
 logger = logging.getLogger(__name__)
+
+PROXY_CONFIG = {
+    'host': 'g416.kdltps.com',
+    'port': 15818,
+    'username': 't15419362286482',
+    'password': 'g5hlxtk8',
+    'backup_host': 'g417.kdltps.com'
+}
 
 def scrape_taobao(books):
     results = {}
 
-    proxy_config = {
-        'host': 'g416.kdltps.com',
-        'port': '15818',
-        'username': 't15419362286482',
-        'password': 'g5hlxtk8',
-        'backup_host': 'g417.kdltps.com'
-    }
+    try:
+        driver = get_chrome_driver_with_proxy(
+            PROXY_CONFIG['host'], PROXY_CONFIG['port'],
+            PROXY_CONFIG['username'], PROXY_CONFIG['password']
+        )
+    except Exception as e:
+        logger.warning(f"Failed to create ChromeDriver with main proxy: {e}, trying backup proxy")
+        try:
+            driver = get_chrome_driver_with_proxy(
+                PROXY_CONFIG['backup_host'], PROXY_CONFIG['port'],
+                PROXY_CONFIG['username'], PROXY_CONFIG['password']
+            )
+        except Exception as e2:
+            logger.error(f"Failed to create ChromeDriver with backup proxy: {e2}")
+            return {book: {'error': 'Failed to init driver with proxy'} for book in books}
 
-    def create_driver(proxy_host):
-        options = Options()
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--window-size=1920x1080')
-        # 淘宝反爬，建议加User-Agent模拟浏览器
-        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36')
-
-        proxy_url = f"http://{proxy_config['username']}:{proxy_config['password']}@{proxy_host}:{proxy_config['port']}"
-        options.add_argument(f'--proxy-server={proxy_url}')
-
-        driver = webdriver.Chrome(options=options)
-        return driver
-
-    for book in books:
-        for proxy_host in [proxy_config['host'], proxy_config['backup_host']]:
+    try:
+        for book in books:
             try:
-                driver = create_driver(proxy_host)
-                driver.get(f'https://s.taobao.com/search?q={book}')
-                WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, '.item.J_MouserOnverReq'))
+                url = f'https://s.taobao.com/search?q={book}'
+                driver.get(url)
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, '.items .item'))
                 )
-                items = driver.find_elements(By.CSS_SELECTOR, '.item.J_MouserOnverReq')
-                if items:
-                    title_elem = items[0].find_element(By.CSS_SELECTOR, '.title')
-                    price_elem = items[0].find_element(By.CSS_SELECTOR, '.price')
-                    title = title_elem.text.strip()
-                    price = price_elem.text.strip()
-                    results[book] = {'title': title, 'price': price, 'source': 'taobao'}
-                    driver.quit()
-                    break
+                item_elems = driver.find_elements(By.CSS_SELECTOR, '.items .item')
+                if item_elems:
+                    title = item_elems[0].find_element(By.CSS_SELECTOR, '.title').text.strip()
+                    results[book] = {'title': title, 'source': 'taobao'}
                 else:
-                    results[book] = {'error': 'No results'}
-                    driver.quit()
-                    break
+                    results[book] = {'error': 'Title not found'}
             except Exception as e:
-                logger.warning(f"taobao fallback proxy due to error: {str(e)}")
-                try:
-                    driver.quit()
-                except:
-                    pass
-        else:
-            results[book] = {'error': 'All proxies failed'}
-        time.sleep(1)
+                logger.error(f"Taobao error for {book}: {e}")
+                results[book] = {'error': str(e)}
+    finally:
+        driver.quit()
 
     return results
