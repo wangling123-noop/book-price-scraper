@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: book-price-scraper
+    env: docker
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    ports:
+      - 5000
